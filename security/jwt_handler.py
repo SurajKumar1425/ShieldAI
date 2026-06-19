@@ -1,12 +1,24 @@
+import os
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 
 
-SECRET_KEY = "shieldai_super_secret_key_change_in_production"
+SECRET_KEY = os.getenv(
+    "SECRET_KEY",
+    "shieldai_development_secret_key"
+)
 
-ALGORITHM = "HS256"
+ALGORITHM = os.getenv(
+    "JWT_ALGORITHM",
+    "HS256"
+)
 
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = int(
+    os.getenv(
+        "ACCESS_TOKEN_EXPIRE_MINUTES",
+        60
+    )
+)
 
 
 def create_access_token(data):
@@ -39,7 +51,6 @@ def verify_access_token(token):
         )
 
         return payload
-
 
     except JWTError:
 
