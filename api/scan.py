@@ -11,6 +11,8 @@ from monitoring.audit import save_security_incident
 from monitoring.alerts import generate_security_alert
 from monitoring.anomaly import track_user_activity
 
+from security.rate_limiter import check_rate_limit
+
 
 router = APIRouter()
 
@@ -25,39 +27,44 @@ class ScanRequest(BaseModel):
 @router.post("/scan")
 def scan_prompt(data: ScanRequest):
 
+    # Request information
     text = data.text
     user_id = data.user_id
     company = data.company
     company_type = data.company_type
 
 
-    # Step 1: Detect sensitive data
+    # API abuse protection
+    check_rate_limit(user_id)
+
+
+    # Step 1: Sensitive data detection
     detections = detect_sensitive_data(text)
 
 
-    # Step 2: Analyze user intent
+    # Step 2: Intent analysis
     intent = analyze_intent(text)
 
 
-    # Step 3: Calculate risk
+    # Step 3: Risk scoring
     risk = calculate_risk(detections)
 
 
-    # Step 4: Check company policy
+    # Step 4: Company policy enforcement
     policy = apply_company_policy(
         detections,
         company_type
     )
 
 
-    # Final security decision
+    # Final decision
     final_action = risk["action"]
 
     if policy["policy_violation"]:
         final_action = "BLOCK"
 
 
-    # Create final scan report
+    # Complete scan report
     scan_result = {
         "timestamp": str(datetime.now()),
         "input_text": text,
@@ -75,7 +82,7 @@ def scan_prompt(data: ScanRequest):
     alert = None
 
 
-    # Store security events
+    # Save dangerous incidents
     if final_action == "BLOCK":
 
         incident = save_security_incident(
@@ -91,7 +98,7 @@ def scan_prompt(data: ScanRequest):
         )
 
 
-    # Track employee behavior
+    # Insider threat tracking
     activity = track_user_activity(
         user_id,
         scan_result
