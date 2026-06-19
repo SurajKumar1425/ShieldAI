@@ -1,5 +1,7 @@
 from fastapi import FastAPI
+
 from api.scan import router as scan_router
+from api.auth import router as auth_router
 
 
 app = FastAPI(
@@ -9,6 +11,14 @@ app = FastAPI(
 )
 
 
+# Authentication APIs
+app.include_router(
+    auth_router,
+    tags=["Authentication"]
+)
+
+
+# Security Scan APIs
 app.include_router(
     scan_router,
     tags=["AI Security Scanner"]
