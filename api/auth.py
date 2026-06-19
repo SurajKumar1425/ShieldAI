@@ -3,12 +3,12 @@ from pydantic import BaseModel
 from passlib.context import CryptContext
 
 from security.jwt_handler import create_access_token
+from security.rate_limiter import check_rate_limit
 
 
 router = APIRouter()
 
 
-# Password hashing setup
 pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto"
@@ -19,30 +19,22 @@ def hash_password(password):
     return pwd_context.hash(password)
 
 
-def verify_password(
-    plain_password,
-    hashed_password
-):
+def verify_password(plain_password, hashed_password):
     return pwd_context.verify(
         plain_password,
         hashed_password
     )
 
 
-# Temporary users database
 USERS_DB = {
     "admin@abc_bank.com": {
-        "password": hash_password(
-            "Admin@123"
-        ),
+        "password": hash_password("Admin@123"),
         "role": "ADMIN",
         "company": "ABC_BANK"
     },
 
     "analyst@abc_bank.com": {
-        "password": hash_password(
-            "Analyst@123"
-        ),
+        "password": hash_password("Analyst@123"),
         "role": "SECURITY_ANALYST",
         "company": "ABC_BANK"
     }
@@ -55,13 +47,12 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/login")
-def login(
-    request: LoginRequest
-):
+def login(request: LoginRequest):
 
-    user = USERS_DB.get(
-        request.email
-    )
+    # Brute force protection
+    check_rate_limit(request.email)
+
+    user = USERS_DB.get(request.email)
 
     if not user:
         raise HTTPException(
