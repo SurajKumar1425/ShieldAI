@@ -2,15 +2,17 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from datetime import datetime
 
-from core.detector import detect_sensitive_data
-from core.risk_engine import calculate_risk
-from core.intent_analyzer import analyze_intent
-from core.policy_engine import apply_company_policy
 
+# ShieldAI v2 Engines
+from security.dlp_engine_v2 import scan_sensitive_data
+from security.risk_engine_v2 import calculate_risk
+from security.policy_engine_v2 import check_company_policy
+from security.alert_engine_v2 import generate_alert
+
+
+# Existing Security Features
 from monitoring.audit import save_security_incident
-from monitoring.alerts import generate_security_alert
 from monitoring.anomaly import track_user_activity
-
 from security.rate_limiter import check_rate_limit
 
 
@@ -27,7 +29,6 @@ class ScanRequest(BaseModel):
 @router.post("/scan")
 def scan_prompt(data: ScanRequest):
 
-    # Request information
     text = data.text
     user_id = data.user_id
     company = data.company
@@ -38,43 +39,62 @@ def scan_prompt(data: ScanRequest):
     check_rate_limit(user_id)
 
 
-    # Step 1: Sensitive data detection
-    detections = detect_sensitive_data(text)
+    # Step 1: Advanced DLP Scan
+    dlp_result = scan_sensitive_data(text)
+
+    detections = dlp_result["detections"]
 
 
-    # Step 2: Intent analysis
-    intent = analyze_intent(text)
-
-
-    # Step 3: Risk scoring
+    # Step 2: Risk Intelligence
     risk = calculate_risk(detections)
 
 
-    # Step 4: Company policy enforcement
-    policy = apply_company_policy(
+    # Step 3: Company Policy Check
+    policy = check_company_policy(
         detections,
         company_type
     )
 
 
-    # Final decision
-    final_action = risk["action"]
+    # Final Decision
+    final_action = risk["recommended_action"]
 
     if policy["policy_violation"]:
         final_action = "BLOCK"
 
 
-    # Complete scan report
+    # Final ShieldAI Report
     scan_result = {
+
         "timestamp": str(datetime.now()),
+
         "input_text": text,
+
         "company_type": company_type,
+
         "detections": detections,
-        "intent_analysis": intent,
-        "risk_score": risk["score"],
-        "risk_level": risk["level"],
-        "recommended_action": final_action,
-        "policy_check": policy
+
+
+        "dlp_summary": {
+            "total_detected":
+                dlp_result["total_detections"]
+        },
+
+
+        "risk_score":
+            risk["risk_score"],
+
+
+        "risk_level":
+            risk["risk_level"],
+
+
+        "recommended_action":
+            final_action,
+
+
+        "policy_check":
+            policy
     }
 
 
@@ -82,7 +102,7 @@ def scan_prompt(data: ScanRequest):
     alert = None
 
 
-    # Save dangerous incidents
+    # Critical Event Handling
     if final_action == "BLOCK":
 
         incident = save_security_incident(
@@ -91,14 +111,17 @@ def scan_prompt(data: ScanRequest):
             scan_result
         )
 
-        alert = generate_security_alert(
+
+        alert = generate_alert(
             user_id,
             company,
-            scan_result
+            risk["risk_level"],
+            detections,
+            final_action
         )
 
 
-    # Insider threat tracking
+    # Insider Threat Monitoring
     activity = track_user_activity(
         user_id,
         scan_result
@@ -106,9 +129,16 @@ def scan_prompt(data: ScanRequest):
 
 
     return {
+
         "status": "SUCCESS",
+
+        "shieldai_version": "2.0.0",
+
         "scan_result": scan_result,
+
         "incident": incident,
+
         "alert": alert,
+
         "user_activity": activity
     }
