@@ -11,12 +11,34 @@ from database.connection import initialize_database
 
 app = FastAPI(
     title="ShieldAI Enterprise Security API",
-    description="AI-powered Data Leakage Prevention and Prompt Security Platform",
-    version="1.0.0"
+    description="""
+## ShieldAI - AI Powered Data Leakage Prevention Platform
+
+### Features:
+
+- 🔍 Sensitive Data Detection
+- 🛡️ AI Prompt Security
+- ⚠️ Risk Scoring Engine
+- 🏢 Company Policy Enforcement
+- 🔐 JWT Authentication
+- 👥 Role Based Access Control
+- 📊 Security Dashboard Analytics
+- 🚨 Real-Time Security Alerts
+
+### Available APIs:
+
+- POST `/scan` → Analyze AI prompts for sensitive information
+- POST `/login` → Generate JWT access token
+- GET `/admin/dashboard` → View enterprise security analytics
+- GET `/health` → Check ShieldAI system health
+""",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 
-# Startup Event
+# Database startup initialization
 @app.on_event("startup")
 def startup_event():
 
@@ -27,7 +49,7 @@ def startup_event():
     )
 
 
-# Validation Error Handler
+# Input validation errors
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
     request: Request,
@@ -44,7 +66,7 @@ async def validation_exception_handler(
     )
 
 
-# Global Exception Handler
+# Global server errors
 @app.exception_handler(Exception)
 async def global_exception_handler(
     request: Request,
@@ -55,7 +77,7 @@ async def global_exception_handler(
         status_code=500,
         content={
             "status": "ERROR",
-            "message": "ShieldAI internal security error",
+            "message": "ShieldAI internal server error",
             "detail": str(exc)
         }
     )
@@ -68,20 +90,21 @@ app.include_router(
 )
 
 
-# AI Security Scan APIs
+# AI Security Scanner APIs
 app.include_router(
     scan_router,
     tags=["AI Security Scanner"]
 )
 
 
-# Dashboard APIs
+# Admin Dashboard APIs
 app.include_router(
     dashboard_router,
-    tags=["Dashboard"]
+    tags=["Dashboard Analytics"]
 )
 
 
+# Home API
 @app.get("/")
 def home():
 
@@ -91,6 +114,7 @@ def home():
     }
 
 
+# Health Check API
 @app.get("/health")
 def health_check():
 
