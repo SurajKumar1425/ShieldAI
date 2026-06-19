@@ -1,8 +1,10 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-jose
-passlib
+passlib[bcrypt]
 bcrypt
 pydantic
 python-multipart
 requests
+python-dotenv
+pytest
