@@ -1,0 +1,30 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment files
+.env
+
+# Virtual environment
+venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+
+# Logs
+*.log
+
+# Database
+*.db
+
+# Testing
+.pytest_cache/
+
+# Coverage reports
+.coverage
+htmlcov/
