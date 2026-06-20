@@ -9,3 +9,4 @@ requests
 python-dotenv
 pytest
 email-validator
+boto3
