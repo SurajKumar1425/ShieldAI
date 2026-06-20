@@ -39,11 +39,15 @@ app = FastAPI(
 )
 
 
+# =========================
 # CORS Configuration
+# =========================
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "https://shieldai-web.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -51,7 +55,10 @@ app.add_middleware(
 )
 
 
-# Database startup initialization
+# =========================
+# Database Initialization
+# =========================
+
 @app.on_event("startup")
 def startup_event():
 
@@ -62,7 +69,10 @@ def startup_event():
     )
 
 
-# Input validation errors
+# =========================
+# Input Validation Errors
+# =========================
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
     request: Request,
@@ -79,7 +89,10 @@ async def validation_exception_handler(
     )
 
 
-# Global server errors
+# =========================
+# Global Server Errors
+# =========================
+
 @app.exception_handler(Exception)
 async def global_exception_handler(
     request: Request,
@@ -96,28 +109,40 @@ async def global_exception_handler(
     )
 
 
+# =========================
 # Authentication APIs
+# =========================
+
 app.include_router(
     auth_router,
     tags=["Authentication"]
 )
 
 
+# =========================
 # AI Security Scanner APIs
+# =========================
+
 app.include_router(
     scan_router,
     tags=["AI Security Scanner"]
 )
 
 
-# Admin Dashboard APIs
+# =========================
+# Dashboard APIs
+# =========================
+
 app.include_router(
     dashboard_router,
     tags=["Dashboard Analytics"]
 )
 
 
+# =========================
 # Home API
+# =========================
+
 @app.get("/")
 def home():
 
@@ -127,7 +152,10 @@ def home():
     }
 
 
+# =========================
 # Health Check API
+# =========================
+
 @app.get("/health")
 def health_check():
 
