@@ -1,13 +1,27 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
 
-from security.jwt_handler import create_access_token
-from security.rate_limiter import check_rate_limit
+import random
+import datetime
+
+from database.connection import (
+    get_database_connection
+)
+
+from security.jwt_handler import (
+    create_access_token
+)
+
+from security.rate_limiter import (
+    check_rate_limit
+)
 
 
 router = APIRouter()
 
+
+# Password Encryption
 
 pwd_context = CryptContext(
     schemes=["bcrypt"],
@@ -19,69 +33,153 @@ def hash_password(password):
     return pwd_context.hash(password)
 
 
-def verify_password(plain_password, hashed_password):
+def verify_password(
+    plain_password,
+    hashed_password
+):
     return pwd_context.verify(
         plain_password,
         hashed_password
     )
 
 
-USERS_DB = {
-    "admin@abc_bank.com": {
-        "password": hash_password("Admin@123"),
-        "role": "ADMIN",
-        "company": "ABC_BANK"
-    },
+# Generate 6 digit OTP
 
-    "analyst@abc_bank.com": {
-        "password": hash_password("Analyst@123"),
-        "role": "SECURITY_ANALYST",
-        "company": "ABC_BANK"
-    }
-}
+def generate_otp():
+
+    return str(
+        random.randint(
+            100000,
+            999999
+        )
+    )
 
 
-class LoginRequest(BaseModel):
-    email: str
+# =========================
+# Request Models
+# =========================
+
+
+class SignupRequest(BaseModel):
+
+    full_name: str
+
+    company_name: str
+
+    email: EmailStr
+
+    employee_id: str
+
+    department: str
+
     password: str
 
 
-@router.post("/login")
-def login(request: LoginRequest):
+class LoginRequest(BaseModel):
 
-    # Brute force protection
-    check_rate_limit(request.email)
+    email: EmailStr
 
-    user = USERS_DB.get(request.email)
+    password: str
+    # =========================
+# Signup API
+# =========================
 
-    if not user:
+@router.post("/signup")
+def signup(request: SignupRequest):
+
+    connection = get_database_connection()
+
+    cursor = connection.cursor()
+
+
+    # Check if email already exists
+
+    cursor.execute(
+        """
+        SELECT email
+        FROM users
+        WHERE email = ?
+        """,
+        (request.email,)
+    )
+
+
+    existing_user = cursor.fetchone()
+
+
+    if existing_user:
+
+        connection.close()
+
         raise HTTPException(
-            status_code=401,
-            detail="Invalid email"
+            status_code=400,
+            detail="Email already registered"
         )
 
 
-    if not verify_password(
-        request.password,
-        user["password"]
-    ):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid password"
+    # Hash user password
+
+    hashed_password = hash_password(
+        request.password
+    )
+
+
+    # Generate Email OTP
+
+    otp = generate_otp()
+
+
+    # Current time
+
+    created_time = str(
+        datetime.datetime.now()
+    )
+
+
+    # Save user into database
+
+    cursor.execute(
+        """
+        INSERT INTO users (
+            full_name,
+            company_name,
+            email,
+            employee_id,
+            department,
+            password_hash,
+            otp_code,
+            created_at
         )
 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            request.full_name,
+            request.company_name,
+            request.email,
+            request.employee_id,
+            request.department,
+            hashed_password,
+            otp,
+            created_time
+        )
+    )
 
-    token = create_access_token({
-        "email": request.email,
-        "role": user["role"],
-        "company": user["company"]
-    })
+
+    connection.commit()
+
+    connection.close()
+
+
+    # TODO:
+    # Send OTP to email service
 
 
     return {
         "status": "SUCCESS",
-        "message": "Login successful",
-        "access_token": token,
-        "token_type": "bearer",
-        "role": user["role"]
+
+        "message":
+        "Account created successfully. Verify your email OTP.",
+
+        "otp_for_testing": otp
     }
