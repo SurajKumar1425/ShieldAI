@@ -7,19 +7,20 @@ import hashlib
 import re
 import datetime
 
-
 from database.connection import (
     get_database_connection
 )
-
 
 from security.jwt_handler import (
     create_access_token
 )
 
-
 from security.rate_limiter import (
     check_rate_limit
+)
+
+from core.email_service import (
+    send_otp_email
 )
 
 
@@ -50,7 +51,7 @@ def verify_password(
     )
 
 
-# Strong Password Validation
+# Enterprise Password Policy
 
 def validate_password(password):
 
@@ -71,7 +72,7 @@ def validate_password(password):
     )
 
 
-# Generate 6 digit OTP
+# Generate 6 Digit OTP
 
 def generate_otp():
 
@@ -83,7 +84,7 @@ def generate_otp():
     )
 
 
-# Hash OTP before storing
+# Hash OTP before Database Storage
 
 def hash_otp(otp):
 
@@ -92,7 +93,7 @@ def hash_otp(otp):
     ).hexdigest()
 
 
-# Current Time
+# Current Timestamp
 
 def current_time():
 
@@ -101,7 +102,7 @@ def current_time():
     )
 
 
-# OTP Expiry
+# OTP Expiry Time
 
 def otp_expiry_time():
 
@@ -113,9 +114,9 @@ def otp_expiry_time():
     )
 
 
-# ======================
-# Request Models
-# ======================
+# ===============================
+# API Request Models
+# ===============================
 
 
 class SignupRequest(BaseModel):
@@ -141,13 +142,9 @@ class OTPRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-
-    email: EmailStr
-
-    password: str
-    # ======================
+    # ===============================
 # Signup API
-# ======================
+# ===============================
 
 @router.post("/signup")
 def signup(request: SignupRequest):
@@ -157,7 +154,7 @@ def signup(request: SignupRequest):
     cursor = connection.cursor()
 
 
-    # Check existing user
+    # Check existing email
 
     cursor.execute(
         """
@@ -184,7 +181,7 @@ def signup(request: SignupRequest):
         )
 
 
-    # Validate password policy
+    # Validate password
 
     if not validate_password(
         request.password
@@ -197,22 +194,22 @@ def signup(request: SignupRequest):
             detail="""
 Password must contain:
 - Minimum 12 characters
-- Uppercase letter
-- Lowercase letter
-- Number
-- Special character
+- One uppercase letter
+- One lowercase letter
+- One number
+- One special character
 """
         )
 
 
-    # Encrypt password
+    # Hash password
 
     password_hash = hash_password(
         request.password
     )
 
 
-    # Create new user
+    # Create user account
 
     cursor.execute(
         """
@@ -320,7 +317,21 @@ Password must contain:
     connection.close()
 
 
-    # Email service will be added next
+    # Send verification email
+
+    email_sent = send_otp_email(
+        request.email,
+        otp
+    )
+
+
+    if not email_sent:
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to send verification email"
+        )
+
 
     return {
 
@@ -328,148 +339,154 @@ Password must contain:
             "SUCCESS",
 
         "message":
-            "Account created successfully. Verification code sent to your email.",
+            "Verification code sent to your company email"
 
-
-        # Remove after email integration
-        "development_otp":
-            otp
     }
-    # ======================
-# Email OTP Verification
-# ======================
+    # ===============================
+# Signup API
+# ===============================
 
-@router.post("/verify-otp")
-def verify_otp(request: OTPRequest):
+@router.post("/signup")
+def signup(request: SignupRequest):
 
     connection = get_database_connection()
 
     cursor = connection.cursor()
 
 
+    # Check existing email
+
     cursor.execute(
         """
-        SELECT 
-            users.user_id,
-            otp_codes.otp_id,
-            otp_codes.otp_hash,
-            otp_codes.expires_at,
-            otp_codes.attempt_count,
-            otp_codes.is_used
-
+        SELECT user_id
         FROM users
-
-        JOIN otp_codes
-        ON users.user_id = otp_codes.user_id
-
-        WHERE users.email = ?
-        AND otp_codes.otp_type = ?
-        ORDER BY otp_codes.otp_id DESC
-        LIMIT 1
+        WHERE email = ?
         """,
         (
             request.email,
-            "EMAIL_VERIFICATION"
         )
     )
 
 
-    otp_record = cursor.fetchone()
+    existing_user = cursor.fetchone()
 
 
-    if not otp_record:
-
-        connection.close()
-
-        raise HTTPException(
-            status_code=404,
-            detail="Verification request not found"
-        )
-
-
-    if otp_record["is_used"] == 1:
+    if existing_user:
 
         connection.close()
 
         raise HTTPException(
             status_code=400,
-            detail="OTP already used"
+            detail="Email already registered"
         )
 
 
-    if otp_record["attempt_count"] >= 3:
+    # Validate password
+
+    if not validate_password(
+        request.password
+    ):
 
         connection.close()
 
         raise HTTPException(
-            status_code=403,
-            detail="Maximum OTP attempts exceeded"
+            status_code=400,
+            detail="""
+Password must contain:
+- Minimum 12 characters
+- One uppercase letter
+- One lowercase letter
+- One number
+- One special character
+"""
         )
 
 
-    if current_time() > otp_record["expires_at"]:
+    # Hash password
 
-        connection.close()
-
-        raise HTTPException(
-            status_code=401,
-            detail="OTP expired"
-        )
-
-
-    if hash_otp(request.otp_code) != otp_record["otp_hash"]:
-
-
-        cursor.execute(
-            """
-            UPDATE otp_codes
-            SET attempt_count = attempt_count + 1
-            WHERE otp_id = ?
-            """,
-            (
-                otp_record["otp_id"],
-            )
-        )
-
-
-        connection.commit()
-
-        connection.close()
-
-
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid OTP"
-        )
-
-
-    cursor.execute(
-        """
-        UPDATE otp_codes
-        SET is_used = 1
-        WHERE otp_id = ?
-        """,
-        (
-            otp_record["otp_id"],
-        )
+    password_hash = hash_password(
+        request.password
     )
 
 
+    # Create user account
+
     cursor.execute(
         """
-        UPDATE users
-        SET 
-            email_verified = 1,
-            account_status = 'ACTIVE',
-            updated_at = ?
-        WHERE user_id = ?
+        INSERT INTO users
+        (
+            full_name,
+            company_name,
+            email,
+            employee_id,
+            department,
+            password_hash,
+            account_status,
+            created_at,
+            updated_at
+        )
+
+        VALUES
+        (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
         """,
         (
+            request.full_name,
+            request.company_name,
+            request.email,
+            request.employee_id,
+            request.department,
+            password_hash,
+            "PENDING",
             current_time(),
-            otp_record["user_id"]
+            current_time()
         )
     )
 
+
+    user_id = cursor.lastrowid
+
+
+    # Generate OTP
+
+    otp = generate_otp()
+
+
+    otp_hash = hash_otp(
+        otp
+    )
+
+
+    # Store OTP securely
+
+    cursor.execute(
+        """
+        INSERT INTO otp_codes
+        (
+            user_id,
+            otp_hash,
+            otp_type,
+            expires_at,
+            created_at
+        )
+
+        VALUES
+        (
+            ?, ?, ?, ?, ?
+        )
+        """,
+        (
+            user_id,
+            otp_hash,
+            "EMAIL_VERIFICATION",
+            otp_expiry_time(),
+            current_time()
+        )
+    )
+
+
+    # Create audit log
 
     cursor.execute(
         """
@@ -480,12 +497,16 @@ def verify_otp(request: OTPRequest):
             description,
             created_at
         )
-        VALUES (?, ?, ?, ?)
+
+        VALUES
+        (
+            ?, ?, ?, ?
+        )
         """,
         (
-            otp_record["user_id"],
-            "EMAIL_VERIFIED",
-            "Employee email verified successfully",
+            user_id,
+            "ACCOUNT_CREATED",
+            "New employee account created",
             current_time()
         )
     )
@@ -496,20 +517,42 @@ def verify_otp(request: OTPRequest):
     connection.close()
 
 
+    # Send verification email
+
+    email_sent = send_otp_email(
+        request.email,
+        otp
+    )
+
+
+    if not email_sent:
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to send verification email"
+        )
+
+
     return {
-        "status": "SUCCESS",
-        "message": "Account verified successfully"
+
+        "status":
+            "SUCCESS",
+
+        "message":
+            "Verification code sent to your company email"
+
     }
-
-
-# ======================
+    # ===============================
 # Login API
-# ======================
+# ===============================
 
 @router.post("/login")
 def login(request: LoginRequest):
 
-    check_rate_limit(request.email)
+    # Brute force protection
+    check_rate_limit(
+        request.email
+    )
 
 
     connection = get_database_connection()
@@ -525,7 +568,8 @@ def login(request: LoginRequest):
             role,
             company_name,
             account_status,
-            account_locked
+            account_locked,
+            failed_login_attempts
 
         FROM users
 
@@ -546,9 +590,11 @@ def login(request: LoginRequest):
 
         raise HTTPException(
             status_code=401,
-            detail="Invalid email"
+            detail="Invalid email or password"
         )
 
+
+    # Account lock check
 
     if user["account_locked"] == 1:
 
@@ -560,30 +606,79 @@ def login(request: LoginRequest):
         )
 
 
+    # Email verification check
+
     if user["account_status"] != "ACTIVE":
 
         connection.close()
 
         raise HTTPException(
             status_code=403,
-            detail="Please verify your email before login"
+            detail="Account is not verified. Please verify your email."
         )
 
+
+    # Password verification
 
     if not verify_password(
         request.password,
         user["password_hash"]
     ):
 
+
+        failed_attempts = (
+            user["failed_login_attempts"] + 1
+        )
+
+
+        account_lock = 0
+
+
+        if failed_attempts >= 5:
+
+            account_lock = 1
+
+
         cursor.execute(
             """
             UPDATE users
-            SET failed_login_attempts =
-            failed_login_attempts + 1
+
+            SET
+                failed_login_attempts = ?,
+                account_locked = ?,
+                updated_at = ?
+
             WHERE user_id = ?
             """,
             (
+                failed_attempts,
+                account_lock,
+                current_time(),
+                user["user_id"]
+            )
+        )
+
+
+        cursor.execute(
+            """
+            INSERT INTO audit_logs
+            (
+                user_id,
+                event_type,
+                description,
+                created_at
+            )
+
+            VALUES
+            (
+                ?, ?, ?, ?
+            )
+            """,
+            (
                 user["user_id"],
+                "FAILED_LOGIN",
+                "Invalid password attempt",
+                current_time()
             )
         )
 
@@ -595,17 +690,21 @@ def login(request: LoginRequest):
 
         raise HTTPException(
             status_code=401,
-            detail="Invalid password"
+            detail="Invalid email or password"
         )
 
+
+    # Successful login reset
 
     cursor.execute(
         """
         UPDATE users
+
         SET
             failed_login_attempts = 0,
             last_login = ?,
             updated_at = ?
+
         WHERE user_id = ?
         """,
         (
@@ -616,6 +715,8 @@ def login(request: LoginRequest):
     )
 
 
+    # Create login audit log
+
     cursor.execute(
         """
         INSERT INTO audit_logs
@@ -625,7 +726,11 @@ def login(request: LoginRequest):
             description,
             created_at
         )
-        VALUES (?, ?, ?, ?)
+
+        VALUES
+        (
+            ?, ?, ?, ?
+        )
         """,
         (
             user["user_id"],
@@ -641,7 +746,9 @@ def login(request: LoginRequest):
     connection.close()
 
 
-    token = create_access_token(
+    # Create JWT token
+
+    access_token = create_access_token(
         {
             "user_id": user["user_id"],
             "email": request.email,
@@ -652,9 +759,24 @@ def login(request: LoginRequest):
 
 
     return {
-        "status": "SUCCESS",
-        "message": "Login successful",
-        "access_token": token,
-        "token_type": "bearer",
-        "role": user["role"]
+
+        "status":
+            "SUCCESS",
+
+        "message":
+            "Login successful",
+
+        "access_token":
+            access_token,
+
+        "token_type":
+            "bearer",
+
+        "role":
+            user["role"]
+
     }
+
+    email: EmailStr
+
+    password: str
