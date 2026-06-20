@@ -21,7 +21,9 @@ from security.rate_limiter import (
 router = APIRouter()
 
 
-# Password Encryption
+# =========================
+# Password Security
+# =========================
 
 pwd_context = CryptContext(
     schemes=["bcrypt"],
@@ -30,6 +32,7 @@ pwd_context = CryptContext(
 
 
 def hash_password(password):
+
     return pwd_context.hash(password)
 
 
@@ -37,13 +40,16 @@ def verify_password(
     plain_password,
     hashed_password
 ):
+
     return pwd_context.verify(
         plain_password,
         hashed_password
     )
 
 
-# Generate 6 digit OTP
+# =========================
+# OTP Generator
+# =========================
 
 def generate_otp():
 
@@ -58,7 +64,6 @@ def generate_otp():
 # =========================
 # Request Models
 # =========================
-
 
 class SignupRequest(BaseModel):
 
@@ -80,19 +85,32 @@ class LoginRequest(BaseModel):
     email: EmailStr
 
     password: str
-    # =========================
+
+
+class OTPRequest(BaseModel):
+
+    email: EmailStr
+
+    otp_code: str
+
+
+# =========================
 # Signup API
 # =========================
 
 @router.post("/signup")
-def signup(request: SignupRequest):
+def signup(
+    request: SignupRequest
+):
 
-    connection = get_database_connection()
+    connection = (
+        get_database_connection()
+    )
 
     cursor = connection.cursor()
 
 
-    # Check if email already exists
+    # Check existing email
 
     cursor.execute(
         """
@@ -100,14 +118,16 @@ def signup(request: SignupRequest):
         FROM users
         WHERE email = ?
         """,
-        (request.email,)
+        (
+            request.email,
+        )
     )
 
 
-    existing_user = cursor.fetchone()
+    user = cursor.fetchone()
 
 
-    if existing_user:
+    if user:
 
         connection.close()
 
@@ -117,30 +137,24 @@ def signup(request: SignupRequest):
         )
 
 
-    # Hash user password
+    # Hash Password
 
-    hashed_password = hash_password(
+    password_hash = hash_password(
         request.password
     )
 
 
-    # Generate Email OTP
+    # Generate OTP
 
     otp = generate_otp()
 
 
-    # Current time
-
-    created_time = str(
-        datetime.datetime.now()
-    )
-
-
-    # Save user into database
+    # Save user
 
     cursor.execute(
         """
-        INSERT INTO users (
+        INSERT INTO users
+        (
             full_name,
             company_name,
             email,
@@ -151,7 +165,10 @@ def signup(request: SignupRequest):
             created_at
         )
 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES
+        (
+            ?, ?, ?, ?, ?, ?, ?, ?
+        )
         """,
         (
             request.full_name,
@@ -159,9 +176,11 @@ def signup(request: SignupRequest):
             request.email,
             request.employee_id,
             request.department,
-            hashed_password,
+            password_hash,
             otp,
-            created_time
+            str(
+                datetime.datetime.now()
+            )
         )
     )
 
@@ -171,15 +190,225 @@ def signup(request: SignupRequest):
     connection.close()
 
 
-    # TODO:
-    # Send OTP to email service
+    return {
+
+        "status":
+            "SUCCESS",
+
+        "message":
+            "Account created. Verify your email OTP.",
+
+        # Remove this in production
+        "otp_for_testing":
+            otp
+    }
+    # =========================
+# Email OTP Verification API
+# =========================
+
+@router.post("/verify-otp")
+def verify_otp(
+    request: OTPRequest
+):
+
+    connection = get_database_connection()
+
+    cursor = connection.cursor()
+
+
+    cursor.execute(
+        """
+        SELECT otp_code,
+               is_email_verified
+        FROM users
+        WHERE email = ?
+        """,
+        (
+            request.email,
+        )
+    )
+
+
+    user = cursor.fetchone()
+
+
+    if not user:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+
+    if user[1] == 1:
+
+        connection.close()
+
+        return {
+            "status": "SUCCESS",
+            "message": "Email already verified"
+        }
+
+
+    if user[0] != request.otp_code:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid OTP"
+        )
+
+
+    cursor.execute(
+        """
+        UPDATE users
+        SET
+            is_email_verified = 1,
+            otp_code = NULL
+        WHERE email = ?
+        """,
+        (
+            request.email,
+        )
+    )
+
+
+    connection.commit()
+
+    connection.close()
 
 
     return {
         "status": "SUCCESS",
-
         "message":
-        "Account created successfully. Verify your email OTP.",
+        "Email verified successfully. You can now login."
+    }
 
-        "otp_for_testing": otp
+
+# =========================
+# Login API
+# =========================
+
+@router.post("/login")
+def login(
+    request: LoginRequest
+):
+
+    # Brute force protection
+    check_rate_limit(
+        request.email
+    )
+
+
+    connection = get_database_connection()
+
+    cursor = connection.cursor()
+
+
+    cursor.execute(
+        """
+        SELECT
+            password_hash,
+            role,
+            company_name,
+            is_email_verified,
+            account_locked
+        FROM users
+        WHERE email = ?
+        """,
+        (
+            request.email,
+        )
+    )
+
+
+    user = cursor.fetchone()
+
+
+    if not user:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email"
+        )
+
+
+    if user[4] == 1:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=403,
+            detail="Account locked. Contact administrator."
+        )
+
+
+    if user[3] == 0:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=403,
+            detail="Verify your email before login."
+        )
+
+
+    if not verify_password(
+        request.password,
+        user[0]
+    ):
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid password"
+        )
+
+
+    # Update last login
+
+    cursor.execute(
+        """
+        UPDATE users
+        SET last_login = ?
+        WHERE email = ?
+        """,
+        (
+            str(datetime.datetime.now()),
+            request.email
+        )
+    )
+
+
+    connection.commit()
+
+    connection.close()
+
+
+    # Create JWT Token
+
+    token = create_access_token(
+        {
+            "email": request.email,
+            "role": user[1],
+            "company": user[2]
+        }
+    )
+
+
+    return {
+        "status": "SUCCESS",
+        "message": "Login successful",
+
+        "access_token": token,
+
+        "token_type": "bearer",
+
+        "role": user[1]
     }
